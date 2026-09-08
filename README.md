@@ -35,7 +35,11 @@ Exit code 1. Your pull request is red, and you know which metric moved before an
 
 ## Why this instead of the alternatives
 
-The eval platforms are priced for teams. Confident AI's top tier is $2,000 a month, Braintrust Pro is $249, Galileo Pro is $100. The open source libraries, RAGAS and DeepEval, compute good metrics but leave you to build the storage, the comparison and the CI gate yourself. So a solo developer stitches three or four tools together and usually ends up with no gate at all.
+The eval platforms are priced for teams. Confident AI runs Free, Starter at $200 a month and Team at $2,000 with Enterprise above that; Braintrust Pro is $249; Galileo Pro is $100. Each has a free tier, and each meters it: Confident AI's is two seats, one project and five test runs a week, which a build gate exhausts by Tuesday.
+
+The open source libraries, RAGAS and DeepEval, compute good metrics but leave you to build the storage, the comparison and the CI gate yourself. So a solo developer stitches three or four tools together and usually ends up with no gate at all.
+
+Pricing checked on the vendors' own pages on 8 September 2026, and it moves, so check it again before quoting it back at anyone.
 
 The other problem is that almost every metric on offer needs an LLM judge. That costs money per run and returns a slightly different number each time, and neither is acceptable in a build gate. **A check that costs a dollar gets run less, and a check that drifts cannot tell a regression from noise.**
 
