@@ -1,0 +1,2 @@
+{"id":"settlement-timing","question":"When does the Benin gateway settle?","expected_answer":"Overnight","relevant_docs":["payments/settlement.md"],"must_contain":["overnight"],"tags":["payments"]}
+{"id":"refund-window","question":"How long do refunds take?","expected_answer":"One business day","relevant_docs":["payments/refunds.md"],"tags":["payments"]}

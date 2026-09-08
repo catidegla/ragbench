@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['22', '24']
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+
+  gate:
+    name: The gate actually gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # A gate that reports a regression and exits zero is decorative, so the
+      # exit codes get asserted rather than assumed.
+      - name: Exit codes are the product
+        run: |
+          node bin/ragbench.mjs run --dataset examples/cases.jsonl \
+            --exec "node examples/fake-rag.mjs" --label main --db .ci/history.db
+
+          cat > broken.jsonl <<'JSON'
+          {"id":"settlement-timing","answer":"Overnight","retrieved":["payments/settlement.md"]}
+          {"id":"refund-window","answer":"No idea","retrieved":["wrong.md"]}
+          JSON
+
+          if node bin/ragbench.mjs gate --dataset examples/cases.jsonl \
+               --predictions broken.jsonl --baseline main --db .ci/history.db --no-save; then
+            echo "a regression exited zero, which makes the gate decorative"
+            exit 1
+          fi
+          echo "regression correctly failed the build"
+
+          node bin/ragbench.mjs gate --dataset examples/cases.jsonl \
+            --exec "node examples/fake-rag.mjs" --baseline main --db .ci/history.db --no-save
+          echo "a clean run correctly passed"
+
+      - name: Determinism
+        run: |
+          # Same inputs must give the same numbers, or "fail on a regression"
+          # means nothing.
+          a=$(node bin/ragbench.mjs run --dataset examples/cases.jsonl --exec "node examples/fake-rag.mjs" --json --no-save)
+          b=$(node bin/ragbench.mjs run --dataset examples/cases.jsonl --exec "node examples/fake-rag.mjs" --json --no-save)
+          [ "$a" = "$b" ] || { echo "two identical runs produced different numbers"; exit 1; }
+          echo "identical runs produce identical numbers"
+
+  package:
+    name: Package contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: The published tarball runs
+        run: |
+          npm pack --pack-destination /tmp
+          mkdir /tmp/consumer && cd /tmp/consumer
+          npm init -y > /dev/null
+          npm i /tmp/ragbench-*.tgz
+          ./node_modules/.bin/ragbench --version
+          ./node_modules/.bin/ragbench init --dataset c.jsonl
+          echo "installed package works"
+      - name: No runtime dependencies
+        run: |
+          count=$(node -p "Object.keys(require('./package.json').dependencies || {}).length")
+          [ "$count" = "0" ] || { echo "expected zero dependencies, found $count"; exit 1; }
