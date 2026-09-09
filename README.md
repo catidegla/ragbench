@@ -66,7 +66,7 @@ Everything here is deterministic and free. Same dataset, same predictions, same 
 | `contains_all` | Required phrases present, for when an amount or a date must appear. |
 | `groundedness` | Share of answer content words supported by the retrieved context. A cheap proxy: it will not catch a fluent misreading, but it catches an answer invented wholesale, and it costs nothing. |
 
-A metric whose inputs are absent is **omitted rather than scored zero**, and aggregation skips missing values rather than averaging them in. A partially labelled dataset should report what it can measure, not a column of zeroes that looks like failure.
+A metric whose inputs are absent is **omitted, not scored zero**, and aggregation skips missing values rather than averaging them in. A partially labelled dataset should report what it can measure, not a column of zeroes that looks like failure.
 
 ## The gate
 
@@ -136,13 +136,13 @@ History lives in a local SQLite file. Nothing is sent anywhere, which is the poi
 
 ## Things it refuses to do quietly
 
-**A case with nothing to check against is refused.** It passes every metric vacuously and lifts your average.
+A case with nothing to check against is refused. It passes every metric vacuously and lifts your average.
 
-**A duplicate id is refused.** Predictions join by id, so a duplicate makes half the suite vanish without a word.
+A duplicate id is refused. Predictions join by id, so a duplicate makes half the suite vanish without a word.
 
-**A case with no prediction is scored as empty, not skipped.** Skipping means a system that answered nothing scores the same as one that answered perfectly on what it attempted.
+A case with no prediction is scored as empty, not skipped. Skipping means a system that answered nothing scores the same as one that answered perfectly on what it attempted.
 
-**A first run with no baseline says so**, rather than reporting a clean comparison that never happened.
+**A first run with no baseline says so**, instead of reporting a clean comparison that never happened.
 
 **Every dataset problem is reported in one pass**, with line numbers, so fixing a file is not a game of whack-a-mole.
 
@@ -158,7 +158,7 @@ There is no LLM judge. One would be useful for answer quality and the hook is th
 npm test    # 52 tests, nothing to install
 ```
 
-The metric tests check the arithmetic against hand computed values rather than asserting the code runs. The ndcg test in particular verifies that a document found first scores higher than the same document found last, while precision and recall report both as identical.
+The metric tests check the arithmetic against hand computed values, not just asserting the code runs. The ndcg test in particular verifies that a document found first scores higher than the same document found last, while precision and recall report both as identical.
 
 ## Requirements
 
