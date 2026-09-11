@@ -116,8 +116,14 @@ export function summarise(verdict, current) {
     : `All checks passed, ${headline} at ${current[headline].toFixed(4)} (no baseline to compare against)`;
 }
 
-/** Markdown for a pull request comment. */
-export function toMarkdown(verdict, current, { title = 'ragbench' } = {}) {
+/**
+ * Markdown for a pull request comment.
+ *
+ * `labels` carries the label audit's warnings, which are about the dataset
+ * rather than the change, so they appear under their own heading and never
+ * affect the verdict line above them.
+ */
+export function toMarkdown(verdict, current, { title = 'ragbench', labels = [] } = {}) {
   const lines = [`### ${title}`, ''];
 
   lines.push(verdict.passed ? '**Passed.**' : `**Failed.** ${verdict.failures.length} check(s).`);
@@ -153,6 +159,11 @@ export function toMarkdown(verdict, current, { title = 'ragbench' } = {}) {
   if (verdict.warnings.length) {
     lines.push('', '**Within tolerance**', '');
     for (const w of verdict.warnings) lines.push(`- ${w.message}`);
+  }
+
+  if (labels.length) {
+    lines.push('', '**Labels**', '');
+    for (const l of labels) lines.push(`- ${l.message}`);
   }
 
   return lines.join('\n');

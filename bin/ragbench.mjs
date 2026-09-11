@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { loadDataset, loadPredictions, join as joinCases } from '../src/dataset.mjs';
 import { scoreCase, aggregate } from '../src/metrics.mjs';
 import { evaluate, summarise, toMarkdown, DEFAULT_TOLERANCE } from '../src/gate.mjs';
+import { auditLabels, compareCorpus, labelWarnings, DEFAULT_TURNOVER } from '../src/labels.mjs';
 import * as store from '../src/store.mjs';
 
 const run = promisify(execFile);
@@ -58,6 +59,8 @@ Options
   --baseline <label>     compare against the latest run with this label
   --threshold m=0.8      minimum for a metric, repeatable
   --tolerance <n>        how far a metric may fall before it fails (default: ${DEFAULT_TOLERANCE})
+  --turnover <n>         corpus churn against the baseline that suggests re-auditing
+                         the labels, 0 to 1 (default: ${DEFAULT_TURNOVER})
   --k <n>                cutoff for the @k metrics (default: 10)
   --db <file>            history database (default: .ragbench/history.db)
   --markdown             emit a pull request comment
@@ -161,6 +164,10 @@ async function collect() {
     cases,
     metrics: aggregate(caseScores.map((s) => s.scores)),
     caseScores,
+    // What the labels look like against what retrieval returned. Computed on
+    // every run rather than behind a flag, because the cost is a set union and
+    // the thing it catches is silent by construction.
+    labels: auditLabels(paired),
     missing,
     extra,
   };
@@ -231,12 +238,33 @@ function printMetrics(metrics, comparisons = []) {
   console.log('');
 }
 
+/**
+ * The label warnings, under their own heading.
+ *
+ * Separated from the gate's own warnings on purpose: those are about the
+ * system under test, these are about whether the measuring instrument still
+ * fits the thing it is measuring.
+ */
+function printLabelWarnings(warnings) {
+  if (!warnings.length) return;
+
+  console.log('');
+  console.log(`  ${c.bold('Labels')}`);
+  for (const warning of warnings) console.log(`  ${c.yellow('~')} ${warning.message}`);
+  console.log('');
+}
+
 const commands = {
   async run() {
     const result = await collect();
 
     if (has('json')) {
-      console.log(JSON.stringify({ metrics: result.metrics, missing: result.missing, cases: result.cases.length }, null, 2));
+      console.log(JSON.stringify({
+        metrics: result.metrics,
+        missing: result.missing,
+        cases: result.cases.length,
+        labels: { orphans: result.labels.orphans, labelledDocs: result.labels.labelledDocs },
+      }, null, 2));
       return;
     }
 
@@ -249,6 +277,7 @@ const commands = {
     }
 
     printMetrics(result.metrics);
+    printLabelWarnings(labelWarnings(result.labels));
 
     if (!has('no-save')) {
       const db = store.open(value('db', '.ragbench/history.db'));
@@ -260,6 +289,7 @@ const commands = {
         missing: result.missing.length,
         gitRef: await gitRef(),
         caseScores: result.caseScores,
+        corpus: result.labels.corpus,
       });
       db.close();
       console.log(c.dim(`  saved as run ${saved.id} under "${saved.label}"\n`));
@@ -278,6 +308,13 @@ const commands = {
       tolerance: Number(value('tolerance', DEFAULT_TOLERANCE)),
     });
 
+    // Deliberately outside the verdict. A corpus that changed shape is usually
+    // somebody doing their job, and failing the build for it would get this
+    // switched off in a week. It changes what the comparison is worth, not
+    // whether the change passed.
+    const drift = compareCorpus(result.labels.corpus, baseline?.corpus ?? []);
+    const labels = labelWarnings(result.labels, drift, { turnover: Number(value('turnover', DEFAULT_TURNOVER)) });
+
     if (!has('no-save')) {
       store.save(db, {
         label: value('label', 'local'),
@@ -287,17 +324,18 @@ const commands = {
         missing: result.missing.length,
         gitRef: await gitRef(),
         caseScores: result.caseScores,
+        corpus: result.labels.corpus,
       });
     }
     db.close();
 
     if (has('markdown')) {
-      console.log(toMarkdown(verdict, result.metrics));
+      console.log(toMarkdown(verdict, result.metrics, { labels }));
       process.exit(verdict.passed ? 0 : 1);
     }
 
     if (has('json')) {
-      console.log(JSON.stringify({ verdict, metrics: result.metrics }, null, 2));
+      console.log(JSON.stringify({ verdict, metrics: result.metrics, labels, drift }, null, 2));
       process.exit(verdict.passed ? 0 : 1);
     }
 
@@ -312,6 +350,8 @@ const commands = {
 
     for (const warning of verdict.warnings) console.log(`  ${c.yellow('~')} ${warning.message}`);
     for (const failure of verdict.failures) console.log(`  ${c.red('x')} ${failure.message}`);
+
+    printLabelWarnings(labels);
 
     console.log('');
     console.log(verdict.passed ? `  ${c.green(summarise(verdict, result.metrics))}` : `  ${c.red(summarise(verdict, result.metrics))}`);

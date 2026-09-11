@@ -42,16 +42,37 @@ export function open(path = '.ragbench/history.db') {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
+  migrate(db);
 
   return db;
 }
 
-export function save(db, { label, dataset, metrics, cases, missing = 0, gitRef = null, caseScores = [] }) {
+/**
+ * Columns added after the first release.
+ *
+ * CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so a
+ * history file written by an older version keeps its old shape and every read
+ * of a new column comes back undefined. Adding them here means an existing
+ * database keeps its runs instead of needing to be thrown away, and the older
+ * runs simply carry a null, which the callers already have to handle because
+ * the first run of any database has no predecessor either.
+ */
+function migrate(db) {
+  const columns = new Set(db.prepare('PRAGMA table_info(runs)').all().map((c) => c.name));
+
+  if (!columns.has('corpus')) db.exec('ALTER TABLE runs ADD COLUMN corpus TEXT');
+}
+
+export function save(db, { label, dataset, metrics, cases, missing = 0, gitRef = null, caseScores = [], corpus = null }) {
   const now = new Date().toISOString();
 
+  // The document ids retrieval actually returned, so a later run can tell
+  // whether the corpus moved under the labels. Stored as the sorted list
+  // rather than a hash, because "something changed" is not actionable and
+  // "forty documents left" is. It is bounded by cases times k.
   const result = db
-    .prepare('INSERT INTO runs (label, dataset, cases, missing, metrics, git_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(label, dataset, cases, missing, JSON.stringify(metrics), gitRef, now);
+    .prepare('INSERT INTO runs (label, dataset, cases, missing, metrics, git_ref, created_at, corpus) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(label, dataset, cases, missing, JSON.stringify(metrics), gitRef, now, corpus ? JSON.stringify(corpus) : null);
 
   const runId = Number(result.lastInsertRowid);
 
@@ -123,5 +144,6 @@ function hydrate(row) {
     metrics: JSON.parse(row.metrics),
     gitRef: row.git_ref,
     createdAt: row.created_at,
+    corpus: row.corpus ? JSON.parse(row.corpus) : null,
   };
 }

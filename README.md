@@ -84,6 +84,38 @@ The tolerance exists because retrieval scores move slightly for reasons that are
 
 A threshold on a metric the run never produced is a **failure**, not a pass. Treating it as passing hides that the check never ran.
 
+## When the labels stop describing the corpus
+
+Every retrieval metric above is computed against `relevant_docs`, which somebody wrote by hand against the corpus as it stood that day. The ranker is re-run on every commit. The labels are not. Documents get re-chunked, re-ided, merged and dropped, and the labels quietly stop pointing at anything, at which point nDCG applies its discount curve to a stale notion of relevant and every number under it measures the wrong thing with great precision.
+
+Two signals, both deterministic, both reported on every run:
+
+**Orphaned labels.** A labelled document that came back for no question in the whole run. It may have left the corpus or it may now rank below k everywhere, and from the outside those look the same. Either way recall for the cases that need it cannot reach 1, whatever you do to the ranker.
+
+**Corpus turnover.** How much the retrieved set of document ids moved against the baseline run. Past 25 percent, configurable with `--turnover`, the labels are worth re-auditing on a sample before the comparison means anything.
+
+Here is the case that makes it worth having. A re-chunk changes every document id, nothing about retrieval quality changes at all, and this is what the gate says:
+
+```
+  recall@k       0.0000  -0.6667
+  ndcg@k         0.0000  -0.6667
+
+  x recall@k fell 0.6667, from 0.6667 to 0.0000
+  x ndcg@k fell 0.6667, from 0.6667 to 0.0000
+
+  Labels
+  ~ 3 of 3 labelled documents were retrieved for no question in this run, so
+    recall cannot reach 1 for the 3 case(s) that need them, whatever the ranker
+    does. They either left the corpus or now rank below k everywhere.
+  ~ the retrieved corpus turned over 100 percent since the baseline (2 new
+    document(s), 2 gone). Labels written against the old shape are worth
+    re-auditing on a sample before trusting this comparison.
+```
+
+Without the last two lines that is a day spent bisecting a ranker that never changed.
+
+**None of it gates.** A corpus that changed shape is usually somebody doing their job, and a check that failed the build for it would be switched off within a week. The warnings sit under their own heading, in the terminal and in the pull request comment, and never touch the verdict. They are about whether the measuring instrument still fits the thing it is measuring, which is a different question from whether this change made it worse.
+
 ## Getting started
 
 ```bash
@@ -155,7 +187,7 @@ There is no LLM judge. One would be useful for answer quality and the hook is th
 ## Testing
 
 ```bash
-npm test    # 52 tests, nothing to install
+npm test    # 71 tests, nothing to install
 ```
 
 The metric tests check the arithmetic against hand computed values, not just asserting the code runs. The ndcg test in particular verifies that a document found first scores higher than the same document found last, while precision and recall report both as identical.

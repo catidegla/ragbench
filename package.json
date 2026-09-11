@@ -1,22 +1,49 @@
 {
   "name": "ragbench",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Score a RAG system against a golden dataset and fail the build when it gets worse. Deterministic metrics, no LLM judge, no API key, no per-run cost. Zero dependencies.",
   "type": "module",
-  "bin": { "ragbench": "bin/ragbench.mjs" },
-  "exports": { ".": "./src/metrics.mjs", "./gate": "./src/gate.mjs" },
-  "files": ["bin", "src", "README.md", "LICENSE"],
-  "engines": { "node": ">=22.5.0" },
+  "bin": {
+    "ragbench": "bin/ragbench.mjs"
+  },
+  "exports": {
+    ".": "./src/metrics.mjs",
+    "./gate": "./src/gate.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
-    "test": "node --test test/metrics.test.mjs test/dataset.test.mjs test/gate.test.mjs test/cli.test.mjs"
+    "test": "node --test test/metrics.test.mjs test/dataset.test.mjs test/gate.test.mjs test/labels.test.mjs test/cli.test.mjs"
   },
   "keywords": [
-    "rag", "evaluation", "eval", "llm", "retrieval", "benchmark",
-    "ci", "regression-testing", "self-hosted", "ndcg", "recall", "observability"
+    "rag",
+    "evaluation",
+    "eval",
+    "llm",
+    "retrieval",
+    "benchmark",
+    "ci",
+    "regression-testing",
+    "self-hosted",
+    "ndcg",
+    "recall",
+    "observability"
   ],
   "author": "Christ-loisele Atidegla",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/catidegla/ragbench.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/catidegla/ragbench.git"
+  },
   "homepage": "https://github.com/catidegla/ragbench#readme",
-  "bugs": { "url": "https://github.com/catidegla/ragbench/issues" }
+  "bugs": {
+    "url": "https://github.com/catidegla/ragbench/issues"
+  }
 }
