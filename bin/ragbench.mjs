@@ -64,6 +64,7 @@ Options
   --k <n>                cutoff for the @k metrics (default: 10)
   --db <file>            history database (default: .ragbench/history.db)
   --markdown             emit a pull request comment
+  --markdown-out <file>  write that comment to a file, from the same scoring pass
   --json                 machine readable output
   --no-save              score without recording the run
 
@@ -355,6 +356,16 @@ const commands = {
       });
     }
     db.close();
+
+    // Written from the same scoring pass rather than from a second run.
+    // A build that wants both a machine readable result and something a
+    // person will read should not have to score twice, because with --exec
+    // scoring means running the whole pipeline again.
+    const markdownFile = value('markdown-out', null);
+    if (markdownFile) {
+      await writeFile(markdownFile, `${toMarkdown(verdict, result.metrics, { labels })}
+`);
+    }
 
     if (has('markdown')) {
       console.log(toMarkdown(verdict, result.metrics, { labels }));

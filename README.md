@@ -151,6 +151,27 @@ ragbench run --dataset cases.jsonl --predictions out.jsonl
 ## In CI
 
 ```yaml
+- uses: catidegla/ragbench@v0.3.0
+  with:
+    dataset: cases.jsonl
+    exec: python my_rag.py
+    baseline: main
+    thresholds: recall@k=0.8
+```
+
+The action scores once and writes both the machine readable report and the
+table a reviewer reads, because with `exec` a second pass means running your
+whole pipeline again. Pin it to a tag: the action runs the source at that ref,
+so the version you pinned is the code that runs.
+
+Or call it directly, which is the same thing without the wrapper:
+
+```yaml
+- run: npx ragbench gate --dataset cases.jsonl --exec "python my_rag.py"
+                         --baseline main --threshold recall@k=0.8
+```
+
+```yaml
 - run: npx ragbench gate --dataset cases.jsonl --exec "python my_rag.py"
                          --baseline main --threshold recall@k=0.8
 ```

@@ -1,0 +1,112 @@
+name: ragbench
+description: Score a RAG system against a golden dataset and fail the build when it gets worse.
+author: Christ-loisele Atidegla
+
+branding:
+  icon: bar-chart-2
+  color: green
+
+inputs:
+  dataset:
+    description: Golden cases, JSON lines.
+    default: cases.jsonl
+  predictions:
+    description: Your system's output, JSON lines. Leave empty if you are using exec.
+    default: ''
+  exec:
+    description: Command that produces predictions, with the dataset on stdin. Use this or predictions, not both.
+    default: ''
+  baseline:
+    description: The label to compare against. Keep branches off it so a branch run never becomes what main is measured against.
+    default: main
+  label:
+    description: The label this run is stored under.
+    default: ''
+  thresholds:
+    description: Minimum values, space separated, for example "recall@k=0.8 ndcg@k=0.7". A threshold on a metric the run never produced is a failure, not a pass.
+    default: ''
+  tolerance:
+    description: How far a metric may fall against the baseline before the run fails.
+    default: '0.01'
+  k:
+    description: Cutoff for the @k metrics. Make this the same k your prompt actually uses, or the numbers describe a system you are not running.
+    default: '10'
+  db:
+    description: History database. Cache or commit it, since a regression is only visible against history.
+    default: .ragbench/history.db
+  summary:
+    description: Write the report to the job summary.
+    default: 'true'
+  fail-on-regression:
+    description: Fail the job when a metric falls or a threshold is missed. Set false to report without blocking.
+    default: 'true'
+
+outputs:
+  passed:
+    description: Whether the gate passed.
+    value: ${{ steps.gate.outputs.passed }}
+  report:
+    description: Path to the JSON report.
+    value: ${{ steps.gate.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - id: gate
+      shell: bash
+      run: |
+        args=(gate
+          --dataset "${{ inputs.dataset }}"
+          --baseline "${{ inputs.baseline }}"
+          --tolerance "${{ inputs.tolerance }}"
+          --k "${{ inputs.k }}"
+          --db "${{ inputs.db }}"
+        )
+
+        if [ -n "${{ inputs.predictions }}" ]; then
+          args+=(--predictions "${{ inputs.predictions }}")
+        fi
+
+        if [ -n "${{ inputs.exec }}" ]; then
+          args+=(--exec "${{ inputs.exec }}")
+        fi
+
+        if [ -n "${{ inputs.label }}" ]; then
+          args+=(--label "${{ inputs.label }}")
+        fi
+
+        for t in ${{ inputs.thresholds }}; do
+          args+=(--threshold "$t")
+        done
+
+        # One scoring pass, two outputs. Scoring again for the summary would
+        # re-run whatever exec points at, and would store a second run under
+        # the same label so the next build compares against this one instead
+        # of the baseline.
+        if [ "${{ inputs.summary }}" = "true" ]; then
+          args+=(--markdown-out ragbench.md)
+        fi
+
+        set +e
+        node "${{ github.action_path }}/bin/ragbench.mjs" "${args[@]}" --json > ragbench.json
+        code=$?
+        set -e
+
+        if [ "$code" = "2" ]; then
+          echo "::error::ragbench refused the input: see the log above"
+          cat ragbench.json 2>/dev/null || true
+          exit 2
+        fi
+
+        passed=$(node -p "JSON.parse(require('fs').readFileSync('ragbench.json','utf8')).verdict.passed")
+        echo "passed=$passed" >> "$GITHUB_OUTPUT"
+        echo "report=ragbench.json" >> "$GITHUB_OUTPUT"
+
+        if [ -f ragbench.md ]; then cat ragbench.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+        if [ "${{ inputs.fail-on-regression }}" = "true" ]; then exit $code; fi

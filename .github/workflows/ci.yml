@@ -86,3 +86,49 @@ jobs:
         run: |
           count=$(node -p "Object.keys(require('./package.json').dependencies || {}).length")
           [ "$count" = "0" ] || { echo "expected zero dependencies, found $count"; exit 1; }
+
+  action:
+    name: The action runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # A first run has no baseline, so the action has nothing to compare and
+      # must still pass. This is what a consumer's very first build looks like.
+      - id: first
+        uses: ./
+        with:
+          dataset: examples/cases.jsonl
+          exec: node examples/fake-rag.mjs
+          baseline: main
+          label: main
+          db: .ci/history.db
+
+      - name: A first run reports no comparison and passes
+        run: |
+          [ "${{ steps.first.outputs.passed }}" = "true" ] || { echo "a first run should not fail"; exit 1; }
+          test -f "${{ steps.first.outputs.report }}" || { echo "no report was written"; exit 1; }
+
+      # And the second half of the promise: a regression has to fail the job.
+      - name: A regression fails the job
+        run: |
+          cat > broken.jsonl <<'JSON'
+          {"id":"settlement-timing","answer":"Overnight","retrieved":["nope.md"]}
+          {"id":"refund-window","answer":"No idea","retrieved":["wrong.md"]}
+          JSON
+
+      - id: regression
+        uses: ./
+        continue-on-error: true
+        with:
+          dataset: examples/cases.jsonl
+          predictions: broken.jsonl
+          baseline: main
+          db: .ci/history.db
+          summary: 'false'
+
+      - name: It failed, and said so in its output
+        run: |
+          [ "${{ steps.regression.outcome }}" = "failure" ] || { echo "the action passed a regression"; exit 1; }
+          [ "${{ steps.regression.outputs.passed }}" = "false" ] || { echo "the action did not report the failure"; exit 1; }
+          echo "the action gates"
