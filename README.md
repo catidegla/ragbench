@@ -8,7 +8,7 @@ No API key. No service. No per-run cost.
 
 [![CI](https://github.com/catidegla/ragbench/actions/workflows/ci.yml/badge.svg)](https://github.com/catidegla/ragbench/actions/workflows/ci.yml)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json)
-[![Node](https://img.shields.io/badge/node-%E2%89%A522.5-339933)](package.json)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522.13-339933)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -194,7 +194,9 @@ The metric tests check the arithmetic against hand computed values, not just ass
 
 ## Requirements
 
-Node 22.5 or newer, for the built-in `node:sqlite`. Nothing else.
+Node 22.13 or newer, which is where the built-in `node:sqlite` stopped needing a flag. 22.5 shipped
+the module but only behind `--experimental-sqlite`, so anything between the two crashes on import
+rather than running. Nothing else.
 
 ## License
 
