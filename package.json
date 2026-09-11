@@ -1,6 +1,6 @@
 {
   "name": "ragbench",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Score a RAG system against a golden dataset and fail the build when it gets worse. Deterministic metrics, no LLM judge, no API key, no per-run cost. Zero dependencies.",
   "type": "module",
   "bin": {

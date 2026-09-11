@@ -151,7 +151,7 @@ ragbench run --dataset cases.jsonl --predictions out.jsonl
 ## In CI
 
 ```yaml
-- uses: catidegla/ragbench@v0.3.0
+- uses: catidegla/ragbench@v0.4.0
   with:
     dataset: cases.jsonl
     exec: python my_rag.py
