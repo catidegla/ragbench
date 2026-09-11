@@ -88,27 +88,31 @@ A threshold on a metric the run never produced is a **failure**, not a pass. Tre
 
 Every retrieval metric above is computed against `relevant_docs`, which somebody wrote by hand against the corpus as it stood that day. The ranker is re-run on every commit. The labels are not. Documents get re-chunked, re-ided, merged and dropped, and the labels quietly stop pointing at anything, at which point nDCG applies its discount curve to a stale notion of relevant and every number under it measures the wrong thing with great precision.
 
-Two signals, both deterministic, both reported on every run:
+Three signals, all deterministic, all reported on every run:
 
 **Orphaned labels.** A labelled document that came back for no question in the whole run. It may have left the corpus or it may now rank below k everywhere, and from the outside those look the same. Either way recall for the cases that need it cannot reach 1, whatever you do to the ranker.
+
+**Which ones are new.** The count on its own decays as a signal exactly when the dataset gets big enough to be worth having: orphans accumulate for benign reasons, the number only ever goes up, and a line reading *3 of 47* every morning stops being read long before it says 4. So the orphan ids are stored per run and the warning leads with the change. *Two more than at the baseline, and here they are* is an event. *Three are unreachable* is weather. Labels that come back are reported too, on their own line, because somebody repairing a dataset should be able to watch the repair land.
 
 **Corpus turnover.** How much the retrieved set of document ids moved against the baseline run. Past 25 percent, configurable with `--turnover`, the labels are worth re-auditing on a sample before the comparison means anything.
 
 Here is the case that makes it worth having. A re-chunk changes every document id, nothing about retrieval quality changes at all, and this is what the gate says:
 
 ```
-  recall@k       0.0000  -0.6667
-  ndcg@k         0.0000  -0.6667
+  recall@k       0.0000  -1.0000
+  ndcg@k         0.0000  -1.0000
 
-  x recall@k fell 0.6667, from 0.6667 to 0.0000
-  x ndcg@k fell 0.6667, from 0.6667 to 0.0000
+  x recall@k fell 1.0000, from 1.0000 to 0.0000
+  x ndcg@k fell 1.0000, from 1.0000 to 0.0000
 
   Labels
-  ~ 3 of 3 labelled documents were retrieved for no question in this run, so
-    recall cannot reach 1 for the 3 case(s) that need them, whatever the ranker
-    does. They either left the corpus or now rank below k everywhere.
-  ~ the retrieved corpus turned over 100 percent since the baseline (2 new
-    document(s), 2 gone). Labels written against the old shape are worth
+  ~ 3 labelled document(s) went unreachable since the baseline:
+    handbook/exceptions, handbook/refunds, handbook/retention. 3 of 3 labelled
+    documents (100 percent) are retrieved for no question in this run, so
+    recall cannot reach 1 for the 3 case(s) that need them, whatever the
+    ranker does.
+  ~ the retrieved corpus turned over 100 percent since the baseline (4 new
+    document(s), 4 gone). Labels written against the old shape are worth
     re-auditing on a sample before trusting this comparison.
 ```
 
@@ -187,7 +191,7 @@ There is no LLM judge. One would be useful for answer quality and the hook is th
 ## Testing
 
 ```bash
-npm test    # 71 tests, nothing to install
+npm test    # 84 tests, nothing to install
 ```
 
 The metric tests check the arithmetic against hand computed values, not just asserting the code runs. The ndcg test in particular verifies that a document found first scores higher than the same document found last, while precision and recall report both as identical.

@@ -66,6 +66,11 @@ export function auditLabels(paired = []) {
     // Sorted so two runs of the same system produce the same stored value, and
     // a diff of the history file is readable.
     corpus: [...corpus].sort(),
+    // The same ids again, without the cases that needed them, because this is
+    // the form that gets stored and compared across runs. The cases move for
+    // their own reasons and would make two identical orphan sets look
+    // different.
+    orphanIds: [...orphans.keys()].sort(),
   };
 }
 
@@ -97,6 +102,55 @@ export function compareCorpus(current = [], previous = []) {
 export const DEFAULT_TURNOVER = 0.25;
 
 /**
+ * Which labels went unreachable since the baseline, and which came back.
+ *
+ * The absolute count degrades as a signal exactly when the dataset becomes
+ * worth having. Orphans accumulate for benign reasons as a corpus grows, so
+ * the number only ever goes up, and a line that reads "3 of 47" every morning
+ * stops being read long before it says 4.
+ *
+ * The change is the thing. "Two more than at the baseline, and here they are"
+ * is an event somebody acts on; "three are unreachable" is a standing
+ * condition somebody scrolls past.
+ *
+ * Recovered is reported too, and is not merely symmetry: a label that was
+ * unreachable and now is not usually means somebody fixed retrieval, and
+ * seeing it confirms the fix reached the thing it was meant to reach.
+ */
+export function compareOrphans(current = [], baseline = null) {
+  if (baseline === null) return null;
+
+  const now = new Set(current.map((o) => (typeof o === 'string' ? o : o.docId)));
+  const before = new Set(baseline.map((o) => (typeof o === 'string' ? o : o.docId)));
+
+  const appeared = [...now].filter((id) => !before.has(id)).sort();
+  const recovered = [...before].filter((id) => !now.has(id)).sort();
+
+  return {
+    appeared,
+    recovered,
+    before: before.size,
+    after: now.size,
+    // Positive when the dataset is decaying, negative when somebody is
+    // repairing it, and zero when the same documents are unreachable as
+    // yesterday, which is a different fact from nothing being wrong.
+    net: now.size - before.size,
+  };
+}
+
+/**
+ * Enough ids to act on, and a count for the rest.
+ *
+ * A warning that prints forty document ids is one nobody finishes reading, and
+ * one that silently prints the first five is one that lies about how big the
+ * problem is.
+ */
+function list(ids, show = 5) {
+  if (ids.length <= show) return ids.join(', ');
+  return `${ids.slice(0, show).join(', ')}, and ${ids.length - show} more`;
+}
+
+/**
  * The lines worth putting in front of somebody, and nothing else.
  *
  * Orphans are reported whenever there is one, because a single orphan is not
@@ -106,19 +160,46 @@ export const DEFAULT_TURNOVER = 0.25;
  *
  * @returns {Array<{kind: string, message: string}>}
  */
-export function labelWarnings(audit, drift = null, { turnover = DEFAULT_TURNOVER } = {}) {
+export function labelWarnings(audit, drift = null, { turnover = DEFAULT_TURNOVER, orphanChange = null } = {}) {
   const warnings = [];
 
   if (audit.orphans.length) {
     const affected = new Set(audit.orphans.flatMap((o) => o.cases));
+    const standing =
+      `${audit.orphans.length} of ${audit.labelledDocs} labelled documents (${(audit.orphanRate * 100).toFixed(0)} percent) ` +
+      `are retrieved for no question in this run, so recall cannot reach 1 for the ` +
+      `${affected.size} case(s) that need them, whatever the ranker does.`;
+
+    // The new ones lead when there are any. This is the whole point of holding
+    // the previous set: the number is a condition and the change is an event,
+    // and putting the event second buries it behind the sentence somebody has
+    // already learned to skip.
+    const message = orphanChange?.appeared.length
+      ? `${orphanChange.appeared.length} labelled document(s) went unreachable since the baseline: ` +
+        `${list(orphanChange.appeared)}. ${standing}`
+      : orphanChange
+        ? `${standing} None of them are new since the baseline, so this is a standing condition ` +
+          `rather than something this change caused.`
+        : `${standing} They either left the corpus or now rank below k everywhere.`;
 
     warnings.push({
       kind: 'orphaned-labels',
       count: audit.orphans.length,
+      rate: audit.orphanRate,
+      appeared: orphanChange?.appeared ?? [],
+      message,
+    });
+  }
+
+  // Worth its own line rather than a clause, because somebody repairing a
+  // dataset wants to see the repair land.
+  if (orphanChange?.recovered.length) {
+    warnings.push({
+      kind: 'labels-recovered',
+      count: orphanChange.recovered.length,
       message:
-        `${audit.orphans.length} of ${audit.labelledDocs} labelled documents were retrieved for no question in this run, ` +
-        `so recall cannot reach 1 for the ${affected.size} case(s) that need them, whatever the ranker does. ` +
-        `They either left the corpus or now rank below k everywhere.`,
+        `${orphanChange.recovered.length} labelled document(s) that were unreachable at the baseline ` +
+        `are being retrieved again: ${list(orphanChange.recovered)}.`,
     });
   }
 

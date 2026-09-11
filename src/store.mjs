@@ -61,9 +61,18 @@ function migrate(db) {
   const columns = new Set(db.prepare('PRAGMA table_info(runs)').all().map((c) => c.name));
 
   if (!columns.has('corpus')) db.exec('ALTER TABLE runs ADD COLUMN corpus TEXT');
+
+  // The orphan set, not just how many there were.
+  //
+  // The count alone cannot produce a delta worth reading: two runs showing
+  // three orphans each can be three entirely different documents, and a
+  // reader told "still three" would reasonably assume nothing moved. The
+  // corpus already stored here cannot be used to recompute them either,
+  // because the labels move between runs as well.
+  if (!columns.has('orphans')) db.exec('ALTER TABLE runs ADD COLUMN orphans TEXT');
 }
 
-export function save(db, { label, dataset, metrics, cases, missing = 0, gitRef = null, caseScores = [], corpus = null }) {
+export function save(db, { label, dataset, metrics, cases, missing = 0, gitRef = null, caseScores = [], corpus = null, orphans = null }) {
   const now = new Date().toISOString();
 
   // The document ids retrieval actually returned, so a later run can tell
@@ -71,8 +80,12 @@ export function save(db, { label, dataset, metrics, cases, missing = 0, gitRef =
   // rather than a hash, because "something changed" is not actionable and
   // "forty documents left" is. It is bounded by cases times k.
   const result = db
-    .prepare('INSERT INTO runs (label, dataset, cases, missing, metrics, git_ref, created_at, corpus) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(label, dataset, cases, missing, JSON.stringify(metrics), gitRef, now, corpus ? JSON.stringify(corpus) : null);
+    .prepare('INSERT INTO runs (label, dataset, cases, missing, metrics, git_ref, created_at, corpus, orphans) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(
+      label, dataset, cases, missing, JSON.stringify(metrics), gitRef, now,
+      corpus ? JSON.stringify(corpus) : null,
+      orphans ? JSON.stringify(orphans) : null,
+    );
 
   const runId = Number(result.lastInsertRowid);
 
@@ -145,5 +158,6 @@ function hydrate(row) {
     gitRef: row.git_ref,
     createdAt: row.created_at,
     corpus: row.corpus ? JSON.parse(row.corpus) : null,
+    orphans: row.orphans ? JSON.parse(row.orphans) : null,
   };
 }

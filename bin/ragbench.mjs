@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { loadDataset, loadPredictions, join as joinCases } from '../src/dataset.mjs';
 import { scoreCase, aggregate } from '../src/metrics.mjs';
 import { evaluate, summarise, toMarkdown, DEFAULT_TOLERANCE } from '../src/gate.mjs';
-import { auditLabels, compareCorpus, labelWarnings, DEFAULT_TURNOVER } from '../src/labels.mjs';
+import { auditLabels, compareCorpus, compareOrphans, labelWarnings, DEFAULT_TURNOVER } from '../src/labels.mjs';
 import * as store from '../src/store.mjs';
 
 const run = promisify(execFile);
@@ -257,13 +257,31 @@ function printLabelWarnings(warnings) {
 const commands = {
   async run() {
     const result = await collect();
+    const label = value('label', 'local');
+
+    // Opened before anything is printed, because the previous run under this
+    // label is what turns "3 labels are unreachable" into "2 of them since
+    // yesterday". Under --no-save the file is never opened at all: a command
+    // told not to write history should not create the file it would write to,
+    // so there is nothing to compare against and the delta is honestly absent.
+    const db = has('no-save') ? null : store.open(value('db', '.ragbench/history.db'));
+    const previous = db ? store.latest(db, label) : null;
+    const orphanChange = compareOrphans(result.labels.orphanIds, previous?.orphans ?? null);
 
     if (has('json')) {
+      if (db) db.close();
       console.log(JSON.stringify({
         metrics: result.metrics,
         missing: result.missing,
         cases: result.cases.length,
-        labels: { orphans: result.labels.orphans, labelledDocs: result.labels.labelledDocs },
+        labels: {
+          orphans: result.labels.orphans,
+          orphanIds: result.labels.orphanIds,
+          orphanRate: result.labels.orphanRate,
+          labelledDocs: result.labels.labelledDocs,
+          labelledCases: result.labels.labelledCases,
+        },
+        orphanChange,
       }, null, 2));
       return;
     }
@@ -277,12 +295,11 @@ const commands = {
     }
 
     printMetrics(result.metrics);
-    printLabelWarnings(labelWarnings(result.labels));
+    printLabelWarnings(labelWarnings(result.labels, null, { orphanChange }));
 
-    if (!has('no-save')) {
-      const db = store.open(value('db', '.ragbench/history.db'));
+    if (db) {
       const saved = store.save(db, {
-        label: value('label', 'local'),
+        label,
         dataset: result.datasetFile,
         metrics: result.metrics,
         cases: result.cases.length,
@@ -290,6 +307,7 @@ const commands = {
         gitRef: await gitRef(),
         caseScores: result.caseScores,
         corpus: result.labels.corpus,
+        orphans: result.labels.orphanIds,
       });
       db.close();
       console.log(c.dim(`  saved as run ${saved.id} under "${saved.label}"\n`));
@@ -313,7 +331,15 @@ const commands = {
     // switched off in a week. It changes what the comparison is worth, not
     // whether the change passed.
     const drift = compareCorpus(result.labels.corpus, baseline?.corpus ?? []);
-    const labels = labelWarnings(result.labels, drift, { turnover: Number(value('turnover', DEFAULT_TURNOVER)) });
+
+    // Against the baseline rather than against whatever ran last, so this line
+    // reads the way the metric table above it does: this branch against main.
+    const orphanChange = compareOrphans(result.labels.orphanIds, baseline?.orphans ?? null);
+
+    const labels = labelWarnings(result.labels, drift, {
+      turnover: Number(value('turnover', DEFAULT_TURNOVER)),
+      orphanChange,
+    });
 
     if (!has('no-save')) {
       store.save(db, {
@@ -325,6 +351,7 @@ const commands = {
         gitRef: await gitRef(),
         caseScores: result.caseScores,
         corpus: result.labels.corpus,
+        orphans: result.labels.orphanIds,
       });
     }
     db.close();
@@ -335,7 +362,7 @@ const commands = {
     }
 
     if (has('json')) {
-      console.log(JSON.stringify({ verdict, metrics: result.metrics, labels, drift }, null, 2));
+      console.log(JSON.stringify({ verdict, metrics: result.metrics, labels, drift, orphanChange }, null, 2));
       process.exit(verdict.passed ? 0 : 1);
     }
 

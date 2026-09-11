@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { auditLabels, compareCorpus, labelWarnings, DEFAULT_TURNOVER } from '../src/labels.mjs';
+import { auditLabels, compareCorpus, compareOrphans, labelWarnings, DEFAULT_TURNOVER } from '../src/labels.mjs';
 import * as store from '../src/store.mjs';
 
 const pair = (id, relevant_docs, retrieved) => ({
@@ -102,6 +102,61 @@ test('a corpus replaced wholesale is complete turnover', () => {
   assert.equal(compareCorpus(['x'], ['y']).turnover, 1);
 });
 
+/* --------------------------------------------------- the orphan delta */
+
+test('the audit hands back a canonical id list for storing', () => {
+  const audit = auditLabels([
+    pair('a', ['doc/9', 'doc/2'], ['doc/1']),
+    pair('b', ['doc/2'], ['doc/1']),
+  ]);
+
+  // Sorted by id, and without the cases, because the cases move for their own
+  // reasons and would make two identical orphan sets compare as different.
+  assert.deepEqual(audit.orphanIds, ['doc/2', 'doc/9']);
+});
+
+test('no baseline reports null rather than a delta it cannot compute', () => {
+  assert.equal(compareOrphans(['doc/1'], null), null);
+});
+
+test('a baseline with no orphans is a baseline, not a missing one', () => {
+  // The distinction that makes the whole feature work. An empty array means
+  // the previous run had clean labels, and every orphan now is new, which is
+  // the single most worth reporting case there is. Treating it as "nothing to
+  // compare against" would swallow exactly that.
+  const change = compareOrphans(['doc/1'], []);
+
+  assert.deepEqual(change.appeared, ['doc/1']);
+  assert.equal(change.net, 1);
+});
+
+test('what went unreachable and what came back are both named', () => {
+  const change = compareOrphans(['doc/2', 'doc/3'], ['doc/1', 'doc/2']);
+
+  assert.deepEqual(change.appeared, ['doc/3']);
+  assert.deepEqual(change.recovered, ['doc/1']);
+  assert.equal(change.before, 2);
+  assert.equal(change.after, 2);
+
+  // Two in, one out, one back: the count did not move and two things happened.
+  assert.equal(change.net, 0);
+});
+
+test('the same orphans as yesterday is a delta of nothing, not an absent delta', () => {
+  const change = compareOrphans(['doc/1'], ['doc/1']);
+
+  assert.deepEqual(change.appeared, []);
+  assert.deepEqual(change.recovered, []);
+  assert.equal(change.net, 0);
+});
+
+test('audit output compares against stored ids without being reshaped first', () => {
+  const audit = auditLabels([pair('a', ['doc/2'], ['doc/1'])]);
+  const change = compareOrphans(audit.orphans, ['doc/2']);
+
+  assert.deepEqual(change.appeared, []);
+});
+
 /* ----------------------------------------------------------- the warnings */
 
 test('a single orphan is reported, because it caps a case below 1', () => {
@@ -151,7 +206,88 @@ test('the threshold is the caller\'s to move', () => {
   assert.equal(labelWarnings(audit, drift, { turnover: 0.05 }).length, 1);
 });
 
+test('an orphan that is new since the baseline is named, not just counted', () => {
+  const audit = auditLabels([
+    pair('a', ['doc/1'], ['doc/9']),
+    pair('b', ['doc/2'], ['doc/9']),
+  ]);
+
+  const change = compareOrphans(audit.orphanIds, ['doc/1']);
+  const [warning] = labelWarnings(audit, null, { orphanChange: change });
+
+  assert.equal(warning.kind, 'orphaned-labels');
+  assert.deepEqual(warning.appeared, ['doc/2']);
+  // The change leads, because the count behind it is the sentence people
+  // have already learned to skip.
+  assert.ok(warning.message.startsWith('1 labelled document(s) went unreachable since the baseline'));
+  assert.match(warning.message, /doc\/2/);
+});
+
+test('a long list of new orphans says how many it is not showing', () => {
+  const ids = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7'];
+  const audit = auditLabels(ids.map((id, i) => pair(`c${i}`, [id], ['elsewhere'])));
+  const [warning] = labelWarnings(audit, null, { orphanChange: compareOrphans(audit.orphanIds, []) });
+
+  assert.match(warning.message, /d1, d2, d3, d4, d5, and 2 more/);
+});
+
+test('an orphan that has been there all along is called a standing condition', () => {
+  const audit = auditLabels([pair('a', ['doc/1'], ['doc/9'])]);
+  const warning = labelWarnings(audit, null, { orphanChange: compareOrphans(audit.orphanIds, ['doc/1']) })[0];
+
+  // The difference between a line worth acting on and a line worth scrolling
+  // past, said out loud so nobody has to work it out from the number.
+  assert.match(warning.message, /None of them are new since the baseline/);
+  assert.deepEqual(warning.appeared, []);
+});
+
+test('with no baseline the warning claims nothing about movement', () => {
+  const audit = auditLabels([pair('a', ['doc/1'], ['doc/9'])]);
+  const [warning] = labelWarnings(audit);
+
+  assert.doesNotMatch(warning.message, /baseline/);
+  assert.equal(warning.rate, 1);
+});
+
+test('labels coming back gets its own line, so a repair is visible', () => {
+  const audit = auditLabels([pair('a', ['doc/1'], ['doc/1'])]);
+  const warnings = labelWarnings(audit, null, { orphanChange: compareOrphans(audit.orphanIds, ['doc/1', 'doc/2']) });
+
+  // Nothing is unreachable now, so there is no orphan warning at all, and the
+  // only line is the good news.
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].kind, 'labels-recovered');
+  assert.match(warnings[0].message, /doc\/1, doc\/2/);
+});
+
 /* --------------------------------------------------------------- storage */
+
+test('the orphan set round trips through the history file', () => {
+  const db = store.open(':memory:');
+
+  store.save(db, { label: 'main', dataset: 'd.jsonl', metrics: {}, cases: 1, orphans: ['doc/2'] });
+  assert.deepEqual(store.latest(db, 'main').orphans, ['doc/2']);
+
+  db.close();
+});
+
+test('a run with clean labels stores an empty set, not an unknown one', () => {
+  // These have to read back differently. Empty means the labels were clean and
+  // every orphan tomorrow is new; null means the run predates the column and a
+  // delta against it would be invented.
+  const db = store.open(':memory:');
+
+  store.save(db, { label: 'clean', dataset: 'd.jsonl', metrics: {}, cases: 1, orphans: [] });
+  store.save(db, { label: 'old', dataset: 'd.jsonl', metrics: {}, cases: 1 });
+
+  assert.deepEqual(store.latest(db, 'clean').orphans, []);
+  assert.equal(store.latest(db, 'old').orphans, null);
+
+  assert.deepEqual(compareOrphans(['doc/1'], store.latest(db, 'clean').orphans).appeared, ['doc/1']);
+  assert.equal(compareOrphans(['doc/1'], store.latest(db, 'old').orphans), null);
+
+  db.close();
+});
 
 test('the corpus round trips through the history file', () => {
   const db = store.open(':memory:');
